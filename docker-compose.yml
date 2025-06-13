@@ -1,4 +1,3 @@
-version: "3.8"
 volumes:
   certs:
     driver: local
@@ -6,13 +5,9 @@ volumes:
     driver: local
   kibanadata:
     driver: local
-  metricbeatdata01:
-    driver: local
-  filebeatdata01:
-    driver: local
-  logstashdata01:
-    driver: local
   fleetserverdata:
+    driver: local
+  suricata_logs:
     driver: local
 
 networks:
@@ -92,6 +87,7 @@ services:
     volumes:
       - certs:/usr/share/elasticsearch/config/certs
       - esdata01:/usr/share/elasticsearch/data
+      - suricata_logs:/var/log/suricata
     ports:
       - ${ES_PORT}:9200
     environment:
@@ -153,91 +149,16 @@ services:
       - SERVER_SSL_CERTIFICATE=config/certs/kibana/kibana.crt
       - SERVER_SSL_KEY=config/certs/kibana/kibana.key
       - SERVER_SSL_CERTIFICATEAUTHORITIES=config/certs/ca/ca.crt
-      - ELASTIC_APM_SECRET_TOKEN=${ELASTIC_APM_SECRET_TOKEN}
     mem_limit: ${KB_MEM_LIMIT}
     healthcheck:
       test:
         [
           "CMD-SHELL",
-          "curl -I -s --cacert config/certs/ca/ca.crt https://localhost:5601 | grep -q 'HTTP/1.1 302 Found'",
+          "curl -I -s --cacert config/certs/ca/ca.crt https://localhost:5601 | grep 'location: /login'",
         ]
       interval: 10s
       timeout: 10s
       retries: 120
-
-  metricbeat01:
-    depends_on:
-      es01:
-        condition: service_healthy
-      kibana:
-        condition: service_healthy
-    image: docker.elastic.co/beats/metricbeat:${STACK_VERSION}
-    user: root
-    volumes:
-      - certs:/usr/share/metricbeat/certs
-      - metricbeatdata01:/usr/share/metricbeat/data
-      - "./metricbeat.yml:/usr/share/metricbeat/metricbeat.yml:ro"
-      - "/var/run/docker.sock:/var/run/docker.sock:ro"
-      - "/sys/fs/cgroup:/hostfs/sys/fs/cgroup:ro"
-      - "/proc:/hostfs/proc:ro"
-      - "/:/hostfs:ro"
-    environment:
-      - ELASTIC_USER=elastic
-      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
-      - ELASTIC_HOSTS=https://es01:9200
-      - KIBANA_HOSTS=https://kibana:5601
-      - LOGSTASH_HOSTS=http://logstash01:9600
-      - CA_CERT=certs/ca/ca.crt
-      - ES_CERT=certs/es01/es01.crt
-      - ES_KEY=certs/es01/es01.key
-      - KB_CERT=certs/kibana/kibana.crt
-      - KB_KEY=certs/kibana/kibana.key
-    command:
-      -strict.perms=false
-
-  filebeat01:
-    depends_on:
-      es01:
-        condition: service_healthy
-    image: docker.elastic.co/beats/filebeat:${STACK_VERSION}
-    user: root
-    volumes:
-      - certs:/usr/share/filebeat/certs
-      - filebeatdata01:/usr/share/filebeat/data
-      - "./filebeat_ingest_data/:/usr/share/filebeat/ingest_data/"
-      - "./filebeat.yml:/usr/share/filebeat/filebeat.yml:ro"
-      - "/var/lib/docker/containers:/var/lib/docker/containers:ro"
-      - "/var/run/docker.sock:/var/run/docker.sock:ro"
-    environment:
-      - ELASTIC_USER=elastic
-      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
-      - ELASTIC_HOSTS=https://es01:9200
-      - KIBANA_HOSTS=https://kibana:5601
-      - LOGSTASH_HOSTS=http://logstash01:9600
-      - CA_CERT=certs/ca/ca.crt
-    command:
-      -strict.perms=false
-
-  logstash01:
-    depends_on:
-      es01:
-        condition: service_healthy
-      kibana:
-        condition: service_healthy
-    image: docker.elastic.co/logstash/logstash:${STACK_VERSION}
-    labels:
-      co.elastic.logs/module: logstash
-    user: root
-    volumes:
-      - certs:/usr/share/logstash/certs
-      - logstashdata01:/usr/share/logstash/data
-      - "./logstash_ingest_data/:/usr/share/logstash/ingest_data/"
-      - "./logstash.conf:/usr/share/logstash/pipeline/logstash.conf:ro"
-    environment:
-      - xpack.monitoring.enabled=false
-      - ELASTIC_USER=elastic
-      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
-      - ELASTIC_HOSTS=https://es01:9200
 
   fleet-server:
     depends_on:
@@ -245,7 +166,7 @@ services:
         condition: service_healthy
       es01:
         condition: service_healthy
-    image: docker.elastic.co/beats/elastic-agent:${STACK_VERSION}
+    image: docker.elastic.co/elastic-agent/elastic-agent:${STACK_VERSION}
     volumes:
       - certs:/certs
       - fleetserverdata:/usr/share/elastic-agent
@@ -256,7 +177,6 @@ services:
       - "/:/hostfs:ro"
     ports:
       - ${FLEET_PORT}:8220
-      - ${APMSERVER_PORT}:8200
     user: root
     environment:
       - SSL_CERTIFICATE_AUTHORITIES=/certs/ca/ca.crt
@@ -267,7 +187,7 @@ services:
       - FLEET_SERVER_ELASTICSEARCH_CA=/certs/ca/ca.crt
       - FLEET_SERVER_ELASTICSEARCH_HOST=https://es01:9200
       - FLEET_SERVER_ELASTICSEARCH_INSECURE=true
-      - FLEET_SERVER_ENABLE=1
+      - FLEET_SERVER_ENABLE=true
       - FLEET_SERVER_CERT=/certs/fleet-server/fleet-server.crt
       - FLEET_SERVER_CERT_KEY=/certs/fleet-server/fleet-server.key
       - FLEET_SERVER_INSECURE_HTTP=true
@@ -279,14 +199,64 @@ services:
       - KIBANA_FLEET_PASSWORD=${ELASTIC_PASSWORD}
       - KIBANA_HOST=https://kibana:5601
 
-  webapp:
-    build:
-      context: app
+  suricata_ids:
+    image: jasonish/suricata:latest 
+    container_name: suricata_ids
+    network_mode: host # IMPORTANT: Allows Suricata to sniff host network interfaces
+    cap_add:
+      - NET_ADMIN # Required for network interface manipulation (e.g., promiscuous mode)
+      - NET_RAW   # Required for raw packet access
+      - SYS_NICE  # Recommended for real-time processing and dropping privileges
     volumes:
-      - "/var/lib/docker/containers:/var/lib/docker/containers:ro"
-      - "/var/run/docker.sock:/var/run/docker.sock:ro"
-      - "/sys/fs/cgroup:/hostfs/sys/fs/cgroup:ro"
-      - "/proc:/hostfs/proc:ro"
-      - "/:/hostfs:ro"
-    ports:
-      - 8000:8000
+      - ./suricata/conf:/etc/suricata
+      - ./suricata/rules:/var/lib/suricata/rules
+      - suricata_logs:/var/log/suricata
+
+    # Adjust 'br-mon' to your host's actual network interface.
+    command: -i br-mon -c /etc/suricata/suricata.yaml --pidfile /var/run/suricata.pid
+    restart: unless-stopped
+    environment:
+      # Optional: Set the user and group to run Suricata as inside the container.
+      # The jasonish image supports PUID/PGID for user mapping for bind mounts.
+      # - PUID=${PUID:-1000} # Uncomment and set PUID/PGID in your .env or replace with actual UIDs/GIDs
+      # - PGID=${PGID:-1000}
+      TZ: Asia/Kolkata # Setting timezone
+
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep suricata > /dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  elastic-agent-suricata:
+    depends_on:
+      es01:
+        condition: service_healthy
+    image: docker.elastic.co/elastic-agent/elastic-agent:${STACK_VERSION}
+    container_name: elastic-agent-suricata
+    volumes:
+      - suricata_logs:/var/log/suricata
+      - certs:/certs
+    environment:
+      - SSL_CERTIFICATE_AUTHORITIES=/certs/ca/ca.crt
+      - CERTIFICATE_AUTHORITIES=/certs/ca/ca.crt
+      - FLEET_CA=/certs/ca/ca.crt
+      - FLEET_ENROLL=true
+      - FLEET_INSECURE=true
+      - FLEET_SERVER_ELASTICSEARCH_CA=/certs/ca/ca.crt
+      - FLEET_SERVER_ELASTICSEARCH_HOST=https://es01:9200
+      - FLEET_SERVER_ELASTICSEARCH_INSECURE=true
+      - FLEET_SERVER_CERT=/certs/fleet-server/fleet-server.crt
+      - FLEET_SERVER_CERT_KEY=/certs/fleet-server/fleet-server.key
+      - FLEET_SERVER_INSECURE_HTTP=true
+      - FLEET_URL=https://fleet-server:8220
+      - FLEET_SERVER_POLICY_ID=d021045e-1397-4462-a1f9-fe87800d381b # get this from kibana after setting it once
+      - FLEET_ENROLLMENT_TOKEN=Y3l5bmFaY0JRTkdWelU4SmthMTY6V3lXOGFGaTk2ZllBRjgxWHNFVGo2UQ== # same as above comment, don't use quotes here
+      # - KIBANA_FLEET_CA=/certs/ca/ca.crt
+      # - KIBANA_FLEET_SETUP=1
+      # - KIBANA_FLEET_USERNAME=elastic
+      # - KIBANA_FLEET_PASSWORD=${ELASTIC_PASSWORD}
+      # - KIBANA_HOST=https://kibana:5601
+
+

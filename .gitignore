@@ -7,3 +7,5 @@ elastic-stack-docker-part-two.wg
 .gitignore
 new-arch.excalidraw
 base-arch.excalidraw
+suricata/conf/classification.config
+suricata/conf/reference.config
