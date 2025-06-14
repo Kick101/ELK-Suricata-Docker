@@ -1,3 +1,5 @@
+#!/usr/bin/bash
+
 docker cp es-cluster-es01-1:/usr/share/elasticsearch/config/certs/ca/ca.crt /tmp/.
 #cat /tmp/ca.crt
 echo 'ssl:';

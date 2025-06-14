@@ -164,8 +164,6 @@ services:
     depends_on:
       kibana:
         condition: service_healthy
-      es01:
-        condition: service_healthy
     image: docker.elastic.co/elastic-agent/elastic-agent:${STACK_VERSION}
     volumes:
       - certs:/certs
@@ -182,7 +180,7 @@ services:
       - SSL_CERTIFICATE_AUTHORITIES=/certs/ca/ca.crt
       - CERTIFICATE_AUTHORITIES=/certs/ca/ca.crt
       - FLEET_CA=/certs/ca/ca.crt
-      - FLEET_ENROLL=1
+      - FLEET_ENROLL=true
       - FLEET_INSECURE=true
       - FLEET_SERVER_ELASTICSEARCH_CA=/certs/ca/ca.crt
       - FLEET_SERVER_ELASTICSEARCH_HOST=https://es01:9200
@@ -194,7 +192,7 @@ services:
       - FLEET_SERVER_POLICY_ID=fleet-server-policy
       - FLEET_URL=https://fleet-server:8220
       - KIBANA_FLEET_CA=/certs/ca/ca.crt
-      - KIBANA_FLEET_SETUP=1
+      - KIBANA_FLEET_SETUP=true
       - KIBANA_FLEET_USERNAME=elastic
       - KIBANA_FLEET_PASSWORD=${ELASTIC_PASSWORD}
       - KIBANA_HOST=https://kibana:5601
@@ -212,8 +210,8 @@ services:
       - ./suricata/rules:/var/lib/suricata/rules
       - suricata_logs:/var/log/suricata
 
-    # Adjust 'br-mon' to your host's actual network interface.
-    command: -i br-mon -c /etc/suricata/suricata.yaml --pidfile /var/run/suricata.pid
+    # Adjust interface to your host's actual network interface.
+    command: -i enp7s0 -c /etc/suricata/suricata.yaml
     restart: unless-stopped
     environment:
       # Optional: Set the user and group to run Suricata as inside the container.
@@ -223,7 +221,7 @@ services:
       TZ: Asia/Kolkata # Setting timezone
 
     healthcheck:
-      test: ["CMD-SHELL", "pgrep suricata > /dev/null"]
+      test: ["CMD-SHELL", "grep -q suricata /proc/1/cmdline"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -231,7 +229,7 @@ services:
 
   elastic-agent-suricata:
     depends_on:
-      es01:
+      kibana:
         condition: service_healthy
     image: docker.elastic.co/elastic-agent/elastic-agent:${STACK_VERSION}
     container_name: elastic-agent-suricata
@@ -242,7 +240,7 @@ services:
       - SSL_CERTIFICATE_AUTHORITIES=/certs/ca/ca.crt
       - CERTIFICATE_AUTHORITIES=/certs/ca/ca.crt
       - FLEET_CA=/certs/ca/ca.crt
-      - FLEET_ENROLL=true
+      - FLEET_ENROLL=1
       - FLEET_INSECURE=true
       - FLEET_SERVER_ELASTICSEARCH_CA=/certs/ca/ca.crt
       - FLEET_SERVER_ELASTICSEARCH_HOST=https://es01:9200
@@ -251,12 +249,6 @@ services:
       - FLEET_SERVER_CERT_KEY=/certs/fleet-server/fleet-server.key
       - FLEET_SERVER_INSECURE_HTTP=true
       - FLEET_URL=https://fleet-server:8220
-      - FLEET_SERVER_POLICY_ID=d021045e-1397-4462-a1f9-fe87800d381b # get this from kibana after setting it once
-      - FLEET_ENROLLMENT_TOKEN=Y3l5bmFaY0JRTkdWelU4SmthMTY6V3lXOGFGaTk2ZllBRjgxWHNFVGo2UQ== # same as above comment, don't use quotes here
-      # - KIBANA_FLEET_CA=/certs/ca/ca.crt
-      # - KIBANA_FLEET_SETUP=1
-      # - KIBANA_FLEET_USERNAME=elastic
-      # - KIBANA_FLEET_PASSWORD=${ELASTIC_PASSWORD}
-      # - KIBANA_HOST=https://kibana:5601
-
+      - FLEET_ENROLLMENT_TOKEN=${SURICATA_ENROLLMENT_TOKEN}
+    
 
